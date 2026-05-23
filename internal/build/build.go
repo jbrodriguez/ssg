@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jbrodriguez/ssg/internal/config"
@@ -295,7 +296,37 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 	if err := r.ExecuteToFile("markdown_page", outPath, data); err != nil {
 		return fmt.Errorf("render %s: %w", section, err)
 	}
+	// Copy any sibling images so relative <img src="./foo.jpg"> in the
+	// markdown body resolves from the output directory.
+	if err := copySiblingAssets(filepath.Dir(srcPath), filepath.Dir(outPath)); err != nil {
+		log.Printf("ssg: copy %s assets: %v", section, err)
+	}
 	log.Printf("ssg: rendered %s", section)
+	return nil
+}
+
+// copySiblingAssets copies image-like files from srcDir to dstDir, skipping
+// the index markdown sources themselves.
+func copySiblingAssets(srcDir, dstDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		switch ext {
+		case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg":
+		default:
+			continue
+		}
+		if err := copyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
