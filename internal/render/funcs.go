@@ -2,12 +2,14 @@ package render
 
 import (
 	"fmt"
+	"html"
 	"html/template"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/jbrodriguez/ssg/internal/content"
+	"github.com/jbrodriguez/ssg/internal/images"
 )
 
 // funcMap returns the template func map.  All site-wide helpers used by
@@ -21,13 +23,13 @@ func (r *Renderer) funcMap() template.FuncMap {
 		"relURL":   relURL,
 		"hasTag":   hasTag,
 		"safeHTML": safeHTML,
-		"srcset":   r.srcset, // image helper, stubbed until images pkg lands
+		"cover":    r.cover,
+		"thumb":    r.thumb,
 		"now":      time.Now,
 		"year":     func(t time.Time) int { return t.Year() },
 	}
 }
 
-// fmtDate formats a time as "2006-01-02 15:04".
 func fmtDate(t time.Time, layout ...string) string {
 	if t.IsZero() {
 		return ""
@@ -39,7 +41,6 @@ func fmtDate(t time.Time, layout ...string) string {
 	return t.Format(l)
 }
 
-// isoDate emits an ISO 8601 (RFC 3339) date string.
 func isoDate(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -47,23 +48,16 @@ func isoDate(t time.Time) string {
 	return t.Format(time.RFC3339)
 }
 
-// absURL returns an absolute URL by joining the site URL with a path.
 func (r *Renderer) absURL(path string) string {
 	return strings.TrimRight(r.siteURL, "/") + "/" + strings.TrimLeft(path, "/")
 }
 
-// relURL ensures a site-relative URL begins with a single slash.
-func relURL(path string) string {
-	return "/" + strings.TrimLeft(path, "/")
-}
+func relURL(path string) string { return "/" + strings.TrimLeft(path, "/") }
 
-// hasTag reports whether a post has tag t.
 func hasTag(p *content.Post, t string) bool { return p.HasTag(t) }
 
-// safeHTML marks an interpolated string as already HTML-safe.
 func safeHTML(s string) template.HTML { return template.HTML(s) }
 
-// shareURL builds a share URL for the given post and platform.
 func (r *Renderer) shareURL(p *content.Post, platform string) string {
 	abs := p.AbsURL(r.siteURL)
 	switch platform {
@@ -79,13 +73,46 @@ func (r *Renderer) shareURL(p *content.Post, platform string) string {
 	return abs
 }
 
-// srcset emits an <img> with width-based srcset.  Stubbed: returns a plain
-// <img> until the images package is wired.  Real impl lives in internal/images
-// and is registered via SetSrcset at construction time.
-func (r *Renderer) srcset(src, alt string, classes ...string) template.HTML {
-	cls := strings.Join(classes, " ")
-	if r.srcsetFn != nil {
-		return r.srcsetFn(src, alt, cls)
+// SetCovers wires the per-slug variants lookup used by the cover/thumb funcs.
+func (r *Renderer) SetCovers(covers map[string]*images.Variants, fallback *images.Variants) {
+	r.covers = covers
+	r.fallbackCover = fallback
+}
+
+// cover emits a <picture>+<img> for a post's full-size cover.  Used by post.html.
+// args: post, alt, class, sizes.
+func (r *Renderer) cover(p *content.Post, alt, class, sizes string) template.HTML {
+	v := r.lookupVariants(p)
+	if v == nil {
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="eager">`, html.EscapeString(alt), html.EscapeString(class)))
 	}
-	return template.HTML(fmt.Sprintf(`<img src=%q alt=%q class=%q loading="lazy">`, src, alt, cls))
+	return renderPicture(v, alt, class, sizes, "eager")
+}
+
+// thumb emits a smaller card image, used by blog_card.html.
+// args: post, class.
+func (r *Renderer) thumb(p *content.Post, class string) template.HTML {
+	v := r.lookupVariants(p)
+	if v == nil {
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="lazy" width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class)))
+	}
+	return renderPicture(v, p.Title, class, "400px", "lazy")
+}
+
+func (r *Renderer) lookupVariants(p *content.Post) *images.Variants {
+	if v, ok := r.covers[p.Slug]; ok {
+		return v
+	}
+	return r.fallbackCover
+}
+
+func renderPicture(v *images.Variants, alt, class, sizes, loading string) template.HTML {
+	largest := v.Largest()
+	h := v.AspectHeight(largest.Width)
+	return template.HTML(fmt.Sprintf(
+		`<picture><source type="image/webp" srcset="%s" sizes="%s"><img src="%s" srcset="%s" sizes="%s" width="%d" height="%d" alt="%s" class="%s" loading="%s"></picture>`,
+		v.SrcsetWebP(), sizes,
+		largest.URL, v.SrcsetJPG(), sizes,
+		largest.Width, h,
+		html.EscapeString(alt), html.EscapeString(class), loading))
 }

@@ -1,6 +1,9 @@
 package render
 
-import "github.com/jbrodriguez/ssg/internal/content"
+import (
+	"github.com/jbrodriguez/ssg/internal/content"
+	"github.com/jbrodriguez/ssg/internal/images"
+)
 
 // Site holds the site-wide constants surfaced to templates.
 type Site struct {
@@ -46,16 +49,17 @@ type PageData struct {
 
 	// Post page
 	Post    *content.Post
+	Cover   *images.Variants // resolved variants for .Post.Cover, may be nil
 	Similar []*content.Post
 
 	// Index / pagination / tag pages
-	Posts        []*content.Post
-	PageNum      int
-	TotalPages   int
-	PrevURL      string
-	NextURL      string
-	CurrentTag   string
-	Tags         []content.TagCount
+	Posts      []*content.Post
+	PageNum    int
+	TotalPages int
+	PrevURL    string
+	NextURL    string
+	CurrentTag string
+	Tags       []content.TagCount
 
 	// Markdown body rendered to safe HTML (for about / unbalanced pages)
 	BodyHTML interface{} // template.HTML

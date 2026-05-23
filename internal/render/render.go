@@ -11,18 +11,16 @@ import (
 	"github.com/yuin/goldmark"
 
 	"github.com/jbrodriguez/ssg/internal/content"
+	"github.com/jbrodriguez/ssg/internal/images"
 )
-
-// SrcsetFunc emits an <img> or <picture> for a given image source.  Wired by
-// the images package; falls back to a plain <img> if nil.
-type SrcsetFunc func(src, alt, class string) template.HTML
 
 // Renderer holds parsed templates and shared rendering state.
 type Renderer struct {
-	siteURL  string
-	tmpl     *template.Template
-	md       goldmark.Markdown
-	srcsetFn SrcsetFunc
+	siteURL       string
+	tmpl          *template.Template
+	md            goldmark.Markdown
+	covers        map[string]*images.Variants
+	fallbackCover *images.Variants
 }
 
 // New parses every *.html under templatesDir (recursively) into one template
@@ -31,6 +29,7 @@ func New(templatesDir, siteURL string) (*Renderer, error) {
 	r := &Renderer{
 		siteURL: siteURL,
 		md:      newMarkdown(),
+		covers:  map[string]*images.Variants{},
 	}
 	t := template.New("").Funcs(r.funcMap())
 	if err := parseTree(t, templatesDir); err != nil {
@@ -40,12 +39,8 @@ func New(templatesDir, siteURL string) (*Renderer, error) {
 	return r, nil
 }
 
-// SetSrcset wires the image helper.  Must be called after the images package
-// finishes processing if you want responsive variants in output.
-func (r *Renderer) SetSrcset(fn SrcsetFunc) { r.srcsetFn = fn }
-
-// RenderMarkdown is exposed so the build orchestrator can convert post bodies
-// before passing PageData to ExecuteToFile.
+// RenderMarkdown exposes the goldmark conversion so the build orchestrator
+// can prerender post bodies before template execution.
 func (r *Renderer) RenderMarkdown(body []byte) (template.HTML, error) {
 	return r.renderMarkdown(body)
 }
@@ -71,9 +66,6 @@ func (r *Renderer) Execute(w io.Writer, name string, data any) error {
 	return r.tmpl.ExecuteTemplate(w, name, data)
 }
 
-// parseTree walks dir and parses every *.html file into t.  Templates use
-// {{define "name"}}...{{end}} blocks, so the file path is not the template
-// name — the names come from the define directives inside.
 func parseTree(t *template.Template, dir string) error {
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -93,5 +85,4 @@ func parseTree(t *template.Template, dir string) error {
 	})
 }
 
-// Compile-time check: content.Post is a *Post in template funcs.
 var _ = (*content.Post)(nil)

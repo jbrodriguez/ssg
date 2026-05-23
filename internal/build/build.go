@@ -11,6 +11,7 @@ import (
 
 	"github.com/jbrodriguez/ssg/internal/config"
 	"github.com/jbrodriguez/ssg/internal/content"
+	"github.com/jbrodriguez/ssg/internal/images"
 	"github.com/jbrodriguez/ssg/internal/render"
 	"github.com/jbrodriguez/ssg/internal/tailwind"
 )
@@ -29,7 +30,6 @@ func Run(cfg *config.Config, opts Options) error {
 	if _, err := tailwind.Check(); err != nil {
 		return err
 	}
-
 	if err := os.MkdirAll(cfg.DistDir, 0o755); err != nil {
 		return err
 	}
@@ -45,9 +45,7 @@ func Run(cfg *config.Config, opts Options) error {
 		return fmt.Errorf("parse templates: %w", err)
 	}
 
-	site := siteFromConfig(cfg)
-
-	// Render markdown body for every post once.
+	// Render markdown bodies up-front.
 	for _, p := range posts {
 		body, err := content.Body(p.Path)
 		if err != nil {
@@ -60,9 +58,33 @@ func Run(cfg *config.Config, opts Options) error {
 		p.HTML = html
 	}
 
-	byTag := content.PostsByTag(posts)
+	// Image pipeline: process every post cover plus the site-wide default.
+	pipeline := images.New(cfg.ImagesOutDir(), cfg.ImageWidths)
+	covers := map[string]*images.Variants{}
+	for _, p := range posts {
+		if p.Cover == "" {
+			continue
+		}
+		coverSrc := filepath.Join(filepath.Dir(p.Path), p.Cover)
+		v, err := pipeline.Process(coverSrc)
+		if err != nil {
+			log.Printf("ssg: cover for %s (%s): %v", p.Slug, p.Cover, err)
+			continue
+		}
+		covers[p.Slug] = v
+	}
 
-	// Render each post page.
+	defaultCoverSrc := filepath.Join(cfg.StaticDir(), "default-post-header-img.jpg")
+	fallback, err := pipeline.Process(defaultCoverSrc)
+	if err != nil {
+		log.Printf("ssg: default cover: %v", err)
+	}
+	r.SetCovers(covers, fallback)
+	log.Printf("ssg: processed %d covers (+ default)", len(covers))
+
+	// Per-post HTML
+	site := siteFromConfig(cfg)
+	byTag := content.PostsByTag(posts)
 	for _, p := range posts {
 		similar := content.SimilarPosts(p, byTag, 6)
 		data := render.PageData{
@@ -70,6 +92,7 @@ func Run(cfg *config.Config, opts Options) error {
 			Section: "posts",
 			SEO:     seoForPost(site, p),
 			Post:    p,
+			Cover:   covers[p.Slug],
 			Similar: similar,
 		}
 		out := filepath.Join(cfg.DistDir, "posts", p.Slug, "index.html")
@@ -140,8 +163,7 @@ func seoForPost(site *render.Site, p *content.Post) render.SEO {
 	}
 }
 
-// copyDir mirrors srcDir into dstDir recursively.  Existing files are
-// overwritten.  Returns nil if srcDir does not exist.
+// copyDir mirrors srcDir into dstDir recursively.
 func copyDir(srcDir, dstDir string) error {
 	info, err := os.Stat(srcDir)
 	if err != nil {
