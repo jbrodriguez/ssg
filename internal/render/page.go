@@ -40,6 +40,12 @@ type SEO struct {
 	TwitterCardType string
 }
 
+// Card wraps a Post with display hints, used by the blog_card partial.
+type Card struct {
+	Post *content.Post
+	Big  bool
+}
+
 // PageData is the data shape passed to every page template.
 // Page-specific fields below are only populated for the relevant page.
 type PageData struct {
@@ -49,7 +55,7 @@ type PageData struct {
 
 	// Post page
 	Post    *content.Post
-	Cover   *images.Variants // resolved variants for .Post.Cover, may be nil
+	Cover   *images.Variants
 	Similar []*content.Post
 
 	// Index / pagination / tag pages
@@ -61,6 +67,6 @@ type PageData struct {
 	CurrentTag string
 	Tags       []content.TagCount
 
-	// Markdown body rendered to safe HTML (for about / unbalanced pages)
+	// About / unbalanced pages (pre-rendered markdown bodies)
 	BodyHTML interface{} // template.HTML
 }

@@ -82,25 +82,34 @@ func Run(cfg *config.Config, opts Options) error {
 	r.SetCovers(covers, fallback)
 	log.Printf("ssg: processed %d covers (+ default)", len(covers))
 
-	// Per-post HTML
 	site := siteFromConfig(cfg)
+	tags := content.TagsFromPosts(posts)
 	byTag := content.PostsByTag(posts)
-	for _, p := range posts {
-		similar := content.SimilarPosts(p, byTag, 6)
-		data := render.PageData{
-			Site:    site,
-			Section: "posts",
-			SEO:     seoForPost(site, p),
-			Post:    p,
-			Cover:   covers[p.Slug],
-			Similar: similar,
-		}
-		out := filepath.Join(cfg.DistDir, "posts", p.Slug, "index.html")
-		if err := r.ExecuteToFile("post", out, data); err != nil {
-			return fmt.Errorf("render post %s: %w", p.Slug, err)
-		}
+
+	if err := renderPosts(r, cfg, site, posts, byTag, covers); err != nil {
+		return err
 	}
-	log.Printf("ssg: rendered %d post pages", len(posts))
+	if err := renderHome(r, cfg, site, posts, tags); err != nil {
+		return err
+	}
+	if err := renderPostsIndex(r, cfg, site, posts, tags); err != nil {
+		return err
+	}
+	if err := renderTagPages(r, cfg, site, byTag, tags); err != nil {
+		return err
+	}
+	if err := renderTagsIndex(r, cfg, site, posts, tags); err != nil {
+		return err
+	}
+	if err := renderSingle(r, cfg, site, "unbalanced", "unbalanced/index.md", filepath.Join(cfg.DistDir, "unbalanced", "index.html"), "unbalanced :: "+site.Title); err != nil {
+		log.Printf("ssg: unbalanced: %v", err)
+	}
+	if err := renderSingle(r, cfg, site, "about", "about/index.md", filepath.Join(cfg.DistDir, "about", "index.html"), "About :: "+site.Title); err != nil {
+		log.Printf("ssg: about: %v (skipping)", err)
+	}
+	if err := render404(r, cfg, site); err != nil {
+		return err
+	}
 
 	// CSS
 	cssOut := filepath.Join(cfg.DistDir, "styles.css")
@@ -124,6 +133,186 @@ func Run(cfg *config.Config, opts Options) error {
 	return nil
 }
 
+func renderPosts(r *render.Renderer, cfg *config.Config, site *render.Site, posts []*content.Post, byTag map[string][]*content.Post, covers map[string]*images.Variants) error {
+	for _, p := range posts {
+		similar := content.SimilarPosts(p, byTag, 6)
+		data := render.PageData{
+			Site:    site,
+			Section: "posts",
+			SEO:     seoForPost(site, p),
+			Post:    p,
+			Cover:   covers[p.Slug],
+			Similar: similar,
+		}
+		out := filepath.Join(cfg.DistDir, "posts", p.Slug, "index.html")
+		if err := r.ExecuteToFile("post", out, data); err != nil {
+			return fmt.Errorf("render post %s: %w", p.Slug, err)
+		}
+	}
+	log.Printf("ssg: rendered %d post pages", len(posts))
+	return nil
+}
+
+func renderHome(r *render.Renderer, cfg *config.Config, site *render.Site, posts []*content.Post, tags []content.TagCount) error {
+	latest := posts
+	if len(latest) > cfg.PostsPerPage {
+		latest = latest[:cfg.PostsPerPage]
+	}
+	topTags := tags
+	if len(topTags) > 20 {
+		topTags = topTags[:20]
+	}
+	data := render.PageData{
+		Site:    site,
+		Section: "",
+		SEO:     seoForHome(site),
+		Posts:   latest,
+		Tags:    topTags,
+	}
+	out := filepath.Join(cfg.DistDir, "index.html")
+	if err := r.ExecuteToFile("index", out, data); err != nil {
+		return fmt.Errorf("render home: %w", err)
+	}
+	log.Printf("ssg: rendered home")
+	return nil
+}
+
+func renderPostsIndex(r *render.Renderer, cfg *config.Config, site *render.Site, posts []*content.Post, tags []content.TagCount) error {
+	per := cfg.PostsPerPage
+	total := (len(posts) + per - 1) / per
+	topTags := tags
+	if len(topTags) > 20 {
+		topTags = topTags[:20]
+	}
+	for i := 0; i < total; i++ {
+		startIdx := i * per
+		endIdx := startIdx + per
+		if endIdx > len(posts) {
+			endIdx = len(posts)
+		}
+		pageNum := i + 1
+		var prev, next string
+		if pageNum > 1 {
+			if pageNum == 2 {
+				prev = "/posts/"
+			} else {
+				prev = fmt.Sprintf("/posts/page/%d/", pageNum-1)
+			}
+		}
+		if pageNum < total {
+			next = fmt.Sprintf("/posts/page/%d/", pageNum+1)
+		}
+		data := render.PageData{
+			Site:       site,
+			Section:    "posts",
+			SEO:        seoForPostsPage(site, pageNum, total),
+			Posts:      posts[startIdx:endIdx],
+			PageNum:    pageNum,
+			TotalPages: total,
+			PrevURL:    prev,
+			NextURL:    next,
+			Tags:       topTags,
+		}
+		var out string
+		if pageNum == 1 {
+			out = filepath.Join(cfg.DistDir, "posts", "index.html")
+		} else {
+			out = filepath.Join(cfg.DistDir, "posts", "page", fmt.Sprintf("%d", pageNum), "index.html")
+		}
+		if err := r.ExecuteToFile("posts_index", out, data); err != nil {
+			return fmt.Errorf("render posts page %d: %w", pageNum, err)
+		}
+	}
+	log.Printf("ssg: rendered %d posts-index pages", total)
+	return nil
+}
+
+func renderTagPages(r *render.Renderer, cfg *config.Config, site *render.Site, byTag map[string][]*content.Post, allTags []content.TagCount) error {
+	for tag, posts := range byTag {
+		// "Other common tags" excludes the current one
+		others := make([]content.TagCount, 0, len(allTags))
+		for _, t := range allTags {
+			if t.Name != tag {
+				others = append(others, t)
+			}
+		}
+		if len(others) > 20 {
+			others = others[:20]
+		}
+		data := render.PageData{
+			Site:       site,
+			Section:    "posts",
+			SEO:        seoForTag(site, tag),
+			Posts:      posts,
+			CurrentTag: tag,
+			Tags:       others,
+		}
+		out := filepath.Join(cfg.DistDir, "tag", tag, "index.html")
+		if err := r.ExecuteToFile("tag", out, data); err != nil {
+			return fmt.Errorf("render tag %s: %w", tag, err)
+		}
+	}
+	log.Printf("ssg: rendered %d tag pages", len(byTag))
+	return nil
+}
+
+func renderTagsIndex(r *render.Renderer, cfg *config.Config, site *render.Site, posts []*content.Post, tags []content.TagCount) error {
+	recent := posts
+	if len(recent) > 4 {
+		recent = recent[:4]
+	}
+	data := render.PageData{
+		Site:    site,
+		Section: "",
+		SEO:     seoForTagsIndex(site),
+		Posts:   recent,
+		Tags:    tags,
+	}
+	out := filepath.Join(cfg.DistDir, "tag", "index.html")
+	if err := r.ExecuteToFile("tags_index", out, data); err != nil {
+		return fmt.Errorf("render tags index: %w", err)
+	}
+	log.Printf("ssg: rendered tags index")
+	return nil
+}
+
+func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, section, relPath, outPath, title string) error {
+	srcPath := filepath.Join(cfg.ContentDir, relPath)
+	page, err := content.LoadSingle(srcPath)
+	if err != nil {
+		return err
+	}
+	html, err := r.RenderMarkdown(page.Body)
+	if err != nil {
+		return err
+	}
+	data := render.PageData{
+		Site:     site,
+		Section:  section,
+		SEO:      seoForSingle(site, title, page.Title),
+		BodyHTML: html,
+	}
+	if err := r.ExecuteToFile("markdown_page", outPath, data); err != nil {
+		return fmt.Errorf("render %s: %w", section, err)
+	}
+	log.Printf("ssg: rendered %s", section)
+	return nil
+}
+
+func render404(r *render.Renderer, cfg *config.Config, site *render.Site) error {
+	data := render.PageData{
+		Site:    site,
+		Section: "",
+		SEO:     seoForSingle(site, "404 :: "+site.Title, "Not found"),
+	}
+	out := filepath.Join(cfg.DistDir, "404.html")
+	if err := r.ExecuteToFile("notfound", out, data); err != nil {
+		return fmt.Errorf("render 404: %w", err)
+	}
+	log.Printf("ssg: rendered 404")
+	return nil
+}
+
 func siteFromConfig(cfg *config.Config) *render.Site {
 	socials := make([]render.Social, len(cfg.Socials))
 	for i, s := range cfg.Socials {
@@ -140,20 +329,18 @@ func siteFromConfig(cfg *config.Config) *render.Site {
 	}
 }
 
-func seoForPost(site *render.Site, p *content.Post) render.SEO {
-	desc := p.Description
-	if desc == "" {
-		desc = "A post published by " + site.Title
-	}
+// SEO helpers --------------------------------------------------------------
+
+func defaultSEO(site *render.Site) render.SEO {
 	return render.SEO{
-		Title:           fmt.Sprintf("%s :: %s", p.Title, site.Title),
-		Description:     desc,
+		Title:           site.Title,
+		Description:     site.Description,
 		Image:           site.URL + "/static/jb.png",
 		ImageWidth:      512,
 		ImageHeight:     512,
 		ImageAlt:        "Cover picture for " + site.Title,
-		Canonical:       p.AbsURL(site.URL),
-		OGType:          "article",
+		Canonical:       site.URL + "/",
+		OGType:          "website",
 		Generator:       "ssg",
 		Sitemap:         site.URL + "/sitemap-index.xml",
 		RSSURL:          site.URL + "/posts/rss.xml",
@@ -163,7 +350,61 @@ func seoForPost(site *render.Site, p *content.Post) render.SEO {
 	}
 }
 
-// copyDir mirrors srcDir into dstDir recursively.
+func seoForHome(site *render.Site) render.SEO {
+	s := defaultSEO(site)
+	s.Description = "The website of " + site.Author + ": " + site.Description
+	return s
+}
+
+func seoForPost(site *render.Site, p *content.Post) render.SEO {
+	s := defaultSEO(site)
+	s.Title = fmt.Sprintf("%s :: %s", p.Title, site.Title)
+	if p.Description != "" {
+		s.Description = p.Description
+	} else {
+		s.Description = "A post published by " + site.Title
+	}
+	s.OGType = "article"
+	s.Canonical = p.AbsURL(site.URL)
+	return s
+}
+
+func seoForPostsPage(site *render.Site, pageNum, total int) render.SEO {
+	s := defaultSEO(site)
+	s.Title = fmt.Sprintf("%s's Blog - Page %d", site.Title, pageNum)
+	s.Description = fmt.Sprintf("Page %d of %d of %s's blog. Here you will find all the articles published by %s in the last years.", pageNum, total, site.Title, site.Title)
+	if pageNum == 1 {
+		s.Canonical = site.URL + "/posts/"
+	} else {
+		s.Canonical = fmt.Sprintf("%s/posts/page/%d/", site.URL, pageNum)
+	}
+	return s
+}
+
+func seoForTag(site *render.Site, tag string) render.SEO {
+	s := defaultSEO(site)
+	s.Title = fmt.Sprintf("Tags :: %s", site.Title)
+	s.Description = fmt.Sprintf("%s's posts under the tag %q.", site.Title, tag)
+	s.Canonical = site.URL + "/tag/" + tag + "/"
+	return s
+}
+
+func seoForTagsIndex(site *render.Site) render.SEO {
+	s := defaultSEO(site)
+	s.Title = fmt.Sprintf("Tags :: %s", site.Title)
+	s.Description = fmt.Sprintf("Page containing the list of tags and recent posts from %s.", site.Title)
+	s.Canonical = site.URL + "/tag/"
+	return s
+}
+
+func seoForSingle(site *render.Site, title, _ string) render.SEO {
+	s := defaultSEO(site)
+	s.Title = title
+	return s
+}
+
+// File copy ----------------------------------------------------------------
+
 func copyDir(srcDir, dstDir string) error {
 	info, err := os.Stat(srcDir)
 	if err != nil {

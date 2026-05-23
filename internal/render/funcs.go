@@ -25,9 +25,48 @@ func (r *Renderer) funcMap() template.FuncMap {
 		"safeHTML": safeHTML,
 		"cover":    r.cover,
 		"thumb":    r.thumb,
+		"card":     card,
+		"dict":     dict,
 		"now":      time.Now,
 		"year":     func(t time.Time) int { return t.Year() },
+		"sub":      func(a, b int) int { return a - b },
+		"add":      func(a, b int) int { return a + b },
+		"seq":      seq,
 	}
+}
+
+// dict builds a map[string]any from key/value pairs.  Useful for passing
+// inline structured data to a partial template, e.g.
+// `{{template "x" (dict "Title" "hi" "Count" 3)}}`.
+func dict(pairs ...any) (map[string]any, error) {
+	if len(pairs)%2 != 0 {
+		return nil, fmt.Errorf("dict: odd number of args")
+	}
+	m := make(map[string]any, len(pairs)/2)
+	for i := 0; i < len(pairs); i += 2 {
+		k, ok := pairs[i].(string)
+		if !ok {
+			return nil, fmt.Errorf("dict: key at %d not a string", i)
+		}
+		m[k] = pairs[i+1]
+	}
+	return m, nil
+}
+
+// card builds a Card wrapper used by the blog_card partial.
+func card(p *content.Post, big bool) Card { return Card{Post: p, Big: big} }
+
+// seq returns [start, start+1, ..., end] inclusive.  Used by pagination
+// templates that need to iterate over page numbers.
+func seq(start, end int) []int {
+	if end < start {
+		return nil
+	}
+	out := make([]int, 0, end-start+1)
+	for i := start; i <= end; i++ {
+		out = append(out, i)
+	}
+	return out
 }
 
 func fmtDate(t time.Time, layout ...string) string {
