@@ -2,12 +2,16 @@
 package build
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jbrodriguez/ssg/internal/config"
@@ -15,6 +19,7 @@ import (
 	"github.com/jbrodriguez/ssg/internal/feed"
 	"github.com/jbrodriguez/ssg/internal/images"
 	"github.com/jbrodriguez/ssg/internal/render"
+	"github.com/jbrodriguez/ssg/internal/serve"
 	"github.com/jbrodriguez/ssg/internal/tailwind"
 )
 
@@ -25,8 +30,56 @@ type Options struct {
 	Port  int
 }
 
-// Run executes the build pipeline.
+// Run executes the build pipeline once, plus optionally serve and watch.
 func Run(cfg *config.Config, opts Options) error {
+	if err := buildOnce(cfg); err != nil {
+		return err
+	}
+	if !opts.Serve {
+		return nil
+	}
+
+	addr := fmt.Sprintf(":%d", opts.Port)
+	if opts.Port == 0 {
+		addr = ":4321"
+	}
+	srv := serve.New(cfg.DistDir, addr)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := srv.Run(ctx); err != nil {
+			log.Printf("ssg: server: %v", err)
+		}
+	}()
+
+	if opts.Watch {
+		go func() {
+			watchDirs := []string{cfg.ContentDir, cfg.ThemeDir, cfg.PublicDir}
+			err := serve.Watch(watchDirs, 200*time.Millisecond, func() {
+				log.Println("ssg: rebuilding (file change)")
+				if err := buildOnce(cfg); err != nil {
+					log.Printf("ssg: rebuild failed: %v", err)
+					return
+				}
+				srv.Reload()
+			})
+			if err != nil {
+				log.Printf("ssg: watcher: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
+	return nil
+}
+
+// buildOnce runs the full build pipeline a single time.
+func buildOnce(cfg *config.Config) error {
 	start := time.Now()
 
 	if _, err := tailwind.Check(); err != nil {
