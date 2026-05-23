@@ -12,6 +12,7 @@ import (
 
 	"github.com/jbrodriguez/ssg/internal/config"
 	"github.com/jbrodriguez/ssg/internal/content"
+	"github.com/jbrodriguez/ssg/internal/feed"
 	"github.com/jbrodriguez/ssg/internal/images"
 	"github.com/jbrodriguez/ssg/internal/render"
 	"github.com/jbrodriguez/ssg/internal/tailwind"
@@ -109,6 +110,12 @@ func Run(cfg *config.Config, opts Options) error {
 		log.Printf("ssg: about: %v (skipping)", err)
 	}
 	if err := render404(r, cfg, site); err != nil {
+		return err
+	}
+	if err := writeRSS(cfg, site, posts, covers); err != nil {
+		return err
+	}
+	if err := writeSitemap(cfg, site, posts, byTag); err != nil {
 		return err
 	}
 
@@ -327,6 +334,87 @@ func copySiblingAssets(srcDir, dstDir string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func writeRSS(cfg *config.Config, site *render.Site, posts []*content.Post, covers map[string]*images.Variants) error {
+	f := &feed.Feed{
+		Title:       site.Title,
+		Description: "Recent content in Posts on " + site.Title,
+		Link:        site.URL + "/posts",
+		SelfLink:    site.URL + "/posts/rss.xml",
+		Language:    "en-us",
+		LastBuild:   time.Now(),
+	}
+	for _, p := range posts {
+		var imgTag string
+		if v := covers[p.Slug]; v != nil && len(v.Sizes) > 0 {
+			largest := v.Largest()
+			imgTag = fmt.Sprintf(
+				`<img src="%s%s" alt="%s feature image" width="%d" height="%d" loading="lazy" decoding="async"/>`,
+				site.URL, largest.URL, p.Title, largest.Width, v.AspectHeight(largest.Width))
+		}
+		f.Items = append(f.Items, feed.Item{
+			Title:       p.Title,
+			Link:        p.AbsURL(site.URL),
+			PubDate:     p.Date,
+			Description: p.Description,
+			Content:     imgTag + string(p.HTML),
+		})
+	}
+	out := filepath.Join(cfg.DistDir, "posts", "rss.xml")
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return err
+	}
+	fout, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer fout.Close()
+	if err := f.WriteRSS(fout); err != nil {
+		return fmt.Errorf("rss: %w", err)
+	}
+	log.Printf("ssg: wrote rss.xml (%d items)", len(f.Items))
+	return nil
+}
+
+func writeSitemap(cfg *config.Config, site *render.Site, posts []*content.Post, byTag map[string][]*content.Post) error {
+	urls := []feed.SitemapURL{
+		{Loc: site.URL + "/"},
+		{Loc: site.URL + "/posts/"},
+		{Loc: site.URL + "/about/"},
+		{Loc: site.URL + "/unbalanced/"},
+		{Loc: site.URL + "/tag/"},
+	}
+	for _, p := range posts {
+		urls = append(urls, feed.SitemapURL{Loc: p.AbsURL(site.URL), LastMod: p.Date})
+	}
+	for tag := range byTag {
+		urls = append(urls, feed.SitemapURL{Loc: site.URL + "/tag/" + tag + "/"})
+	}
+
+	out0 := filepath.Join(cfg.DistDir, "sitemap-0.xml")
+	f0, err := os.Create(out0)
+	if err != nil {
+		return err
+	}
+	if err := feed.WriteSitemap(f0, urls); err != nil {
+		f0.Close()
+		return fmt.Errorf("sitemap-0: %w", err)
+	}
+	f0.Close()
+
+	outIdx := filepath.Join(cfg.DistDir, "sitemap-index.xml")
+	fIdx, err := os.Create(outIdx)
+	if err != nil {
+		return err
+	}
+	if err := feed.WriteSitemapIndex(fIdx, []string{site.URL + "/sitemap-0.xml"}); err != nil {
+		fIdx.Close()
+		return fmt.Errorf("sitemap-index: %w", err)
+	}
+	fIdx.Close()
+	log.Printf("ssg: wrote sitemap (%d urls)", len(urls))
 	return nil
 }
 
