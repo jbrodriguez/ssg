@@ -5,9 +5,10 @@ import (
 	"github.com/jbrodriguez/ssg/internal/scaffold"
 )
 
-// NewCmd is `ssg new <title>`.
+// NewCmd is `ssg new <slug>`.
 type NewCmd struct {
-	Title string `arg:"" help:"Title of the new post."`
+	Slug  string `arg:"" help:"Slug (directory name) for the new post."`
+	Title string `short:"t" help:"Post title. Defaults to \"Notes <slug>\"."`
 }
 
 // Run executes the new-post scaffolder.
@@ -16,5 +17,5 @@ func (n *NewCmd) Run(r *Root) error {
 	if err != nil {
 		return err
 	}
-	return scaffold.NewPost(cfg, n.Title)
+	return scaffold.NewPost(cfg, n.Slug, scaffold.NewPostOptions{Title: n.Title})
 }
