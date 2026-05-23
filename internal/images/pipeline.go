@@ -176,10 +176,23 @@ func (v *Variants) AspectHeight(width int) int {
 	return width * v.SrcHeight / v.SrcWidth
 }
 
+// maxVariantWidth caps the largest variant we'll ever emit, regardless of
+// source size.  Above this, displays don't have enough device pixels to
+// benefit and we'd just waste bytes (4K phone photos, etc.).
+const maxVariantWidth = 2400
+
 // chooseWidths returns the list of variant widths to emit for a source of
-// width srcW.  Strategy: include each configured width strictly smaller than
-// srcW, then always append srcW as the largest variant so retina displays
-// can request the native source resolution without upscaling.
+// width srcW.  Strategy:
+//   - include each configured width strictly smaller than srcW
+//   - append the source width as a non-upscaled variant for retina displays,
+//     capped at maxVariantWidth
+//
+// Examples (widths = [400, 800, 1200, 1600]):
+//
+//	srcW=315           -> [315]
+//	srcW=520           -> [400, 520]
+//	srcW=1765          -> [400, 800, 1200, 1600, 1765]
+//	srcW=6000 (capped) -> [400, 800, 1200, 1600, 2400]
 func chooseWidths(widths []int, srcW int) []int {
 	out := make([]int, 0, len(widths)+1)
 	for _, w := range widths {
@@ -187,7 +200,14 @@ func chooseWidths(widths []int, srcW int) []int {
 			out = append(out, w)
 		}
 	}
-	out = append(out, srcW)
+	largest := srcW
+	if largest > maxVariantWidth {
+		largest = maxVariantWidth
+	}
+	// Avoid duplicating the largest configured width (e.g., srcW == 1600).
+	if len(out) == 0 || largest > out[len(out)-1] {
+		out = append(out, largest)
+	}
 	return out
 }
 
