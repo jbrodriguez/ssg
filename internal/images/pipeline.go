@@ -96,10 +96,14 @@ func (p *Pipeline) Process(srcPath string) (*Variants, error) {
 		webpPath := filepath.Join(p.outDir, name+".webp")
 
 		if !fileExists(jpgPath) || !fileExists(webpPath) {
-			// Resize once, encode twice.
-			resized := imaging.Resize(src, w, 0, imaging.Lanczos)
+			// Resize once, encode twice.  When w equals the source width we
+			// skip the resize step entirely to avoid any unnecessary sampling.
+			var img = src
+			if w != srcW {
+				img = imaging.Resize(src, w, 0, imaging.Lanczos)
+			}
 			if !fileExists(jpgPath) {
-				if err := imaging.Save(resized, jpgPath, imaging.JPEGQuality(85)); err != nil {
+				if err := imaging.Save(img, jpgPath, imaging.JPEGQuality(92)); err != nil {
 					return nil, fmt.Errorf("save %s: %w", jpgPath, err)
 				}
 			}
@@ -108,7 +112,7 @@ func (p *Pipeline) Process(srcPath string) (*Variants, error) {
 				if err != nil {
 					return nil, err
 				}
-				if err := webp.Encode(f, resized, &webp.Options{Quality: 80}); err != nil {
+				if err := webp.Encode(f, img, &webp.Options{Quality: 88}); err != nil {
 					f.Close()
 					return nil, fmt.Errorf("encode %s: %w", webpPath, err)
 				}
@@ -172,17 +176,18 @@ func (v *Variants) AspectHeight(width int) int {
 	return width * v.SrcHeight / v.SrcWidth
 }
 
+// chooseWidths returns the list of variant widths to emit for a source of
+// width srcW.  Strategy: include each configured width strictly smaller than
+// srcW, then always append srcW as the largest variant so retina displays
+// can request the native source resolution without upscaling.
 func chooseWidths(widths []int, srcW int) []int {
-	out := make([]int, 0, len(widths))
+	out := make([]int, 0, len(widths)+1)
 	for _, w := range widths {
-		if w <= srcW {
+		if w < srcW {
 			out = append(out, w)
 		}
 	}
-	// Always emit at least one variant — the source size — if everything was too big.
-	if len(out) == 0 {
-		out = append(out, srcW)
-	}
+	out = append(out, srcW)
 	return out
 }
 
