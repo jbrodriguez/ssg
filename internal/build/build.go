@@ -224,7 +224,7 @@ func renderPosts(r *render.Renderer, cfg *config.Config, site *render.Site, post
 		data := render.PageData{
 			Site:    site,
 			Section: "posts",
-			SEO:     seoForPost(site, p),
+			SEO:     seoForPost(site, p, covers[p.Slug]),
 			Post:    p,
 			Cover:   covers[p.Slug],
 			Similar: similar,
@@ -568,7 +568,7 @@ func seoForHome(site *render.Site) render.SEO {
 	return s
 }
 
-func seoForPost(site *render.Site, p *content.Post) render.SEO {
+func seoForPost(site *render.Site, p *content.Post, cover *images.Variants) render.SEO {
 	s := defaultSEO(site)
 	s.Title = fmt.Sprintf("%s :: %s", p.Title, site.Title)
 	if p.Description != "" {
@@ -578,6 +578,15 @@ func seoForPost(site *render.Site, p *content.Post) render.SEO {
 	}
 	s.OGType = "article"
 	s.Canonical = p.AbsURL(site.URL)
+	// Use the post's own cover as the social-share image (og/twitter), so
+	// shared links show the post image rather than the generic site logo.
+	if cover != nil {
+		largest := cover.Largest()
+		s.Image = site.URL + largest.URL
+		s.ImageWidth = largest.Width
+		s.ImageHeight = cover.AspectHeight(largest.Width)
+		s.ImageAlt = p.Title
+	}
 	return s
 }
 
