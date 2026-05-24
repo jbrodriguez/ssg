@@ -23,9 +23,11 @@ func (r *Renderer) funcMap() template.FuncMap {
 		"relURL":   relURL,
 		"hasTag":   hasTag,
 		"safeHTML": safeHTML,
-		"cover":    r.cover,
-		"thumb":    r.thumb,
-		"card":     card,
+		"cover":     r.cover,
+		"thumb":     r.thumb,
+		"thumbLazy": r.thumbLazy,
+		"card":      card,
+		"cardLazy":  cardLazy,
 		"dict":     dict,
 		"now":      time.Now,
 		"year":     func(t time.Time) int { return t.Year() },
@@ -55,6 +57,10 @@ func dict(pairs ...any) (map[string]any, error) {
 
 // card builds a Card wrapper used by the blog_card partial.
 func card(p *content.Post, big bool) Card { return Card{Post: p, Big: big} }
+
+// cardLazy builds a Card whose thumbnail will be lazy-loaded.  Use for
+// cards that render well below the fold (e.g. similar-posts on post.html).
+func cardLazy(p *content.Post, big bool) Card { return Card{Post: p, Big: big, Lazy: true} }
 
 // seq returns [start, start+1, ..., end] inclusive.  Used by pagination
 // templates that need to iterate over page numbers.
@@ -128,17 +134,25 @@ func (r *Renderer) cover(p *content.Post, alt, class, sizes string) template.HTM
 	return renderPicture(v, alt, class, sizes, "eager")
 }
 
-// thumb emits a smaller card image, used by blog_card.html.  Card thumbnails
-// are small (~10-30KB each) and typically visible above the fold on listing
-// pages, so we load them eagerly — lazy-loading was deferring them in dev
-// behind the SSE connection slot.
+// thumb emits an eager-loaded card thumbnail.  Use for cards that render
+// above (or near) the fold on listing pages.
 // args: post, class.
 func (r *Renderer) thumb(p *content.Post, class string) template.HTML {
+	return r.thumbWith(p, class, "eager")
+}
+
+// thumbLazy emits a lazy-loaded card thumbnail.  Use for similar-posts and
+// other cards that sit well below the fold.
+func (r *Renderer) thumbLazy(p *content.Post, class string) template.HTML {
+	return r.thumbWith(p, class, "lazy")
+}
+
+func (r *Renderer) thumbWith(p *content.Post, class, loading string) template.HTML {
 	v := r.lookupVariants(p)
 	if v == nil {
-		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="eager" width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class)))
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading=%q width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class), loading))
 	}
-	return renderPicture(v, p.Title, class, "400px", "eager")
+	return renderPicture(v, p.Title, class, "400px", loading)
 }
 
 func (r *Renderer) lookupVariants(p *content.Post) *images.Variants {

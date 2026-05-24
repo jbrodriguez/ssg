@@ -41,9 +41,13 @@ type SEO struct {
 }
 
 // Card wraps a Post with display hints, used by the blog_card partial.
+// Lazy controls whether the card's thumbnail is loaded eagerly (listings,
+// typically above the fold) or lazily (similar-posts at the bottom of a
+// post page, well below the fold).
 type Card struct {
 	Post *content.Post
 	Big  bool
+	Lazy bool
 }
 
 // PageData is the data shape passed to every page template.
