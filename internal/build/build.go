@@ -4,6 +4,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
 	"os"
@@ -211,6 +212,14 @@ func buildOnce(cfg *config.Config) error {
 func renderPosts(r *render.Renderer, cfg *config.Config, site *render.Site, posts []*content.Post, byTag map[string][]*content.Post, covers map[string]*images.Variants) error {
 	for _, p := range posts {
 		similar := content.SimilarPosts(p, byTag, 6)
+		out := filepath.Join(cfg.DistDir, "posts", p.Slug, "index.html")
+		// Copy co-located body images and rewrite their src to absolute
+		// /posts/<slug>/foo.png so they resolve regardless of trailing slash.
+		if rewritten, err := localizeInlineImages(string(p.HTML), filepath.Dir(p.Path), filepath.Dir(out), p.URL()); err != nil {
+			log.Printf("ssg: copy post %s images: %v", p.Slug, err)
+		} else {
+			p.HTML = template.HTML(rewritten)
+		}
 		data := render.PageData{
 			Site:    site,
 			Section: "posts",
@@ -219,14 +228,8 @@ func renderPosts(r *render.Renderer, cfg *config.Config, site *render.Site, post
 			Cover:   covers[p.Slug],
 			Similar: similar,
 		}
-		out := filepath.Join(cfg.DistDir, "posts", p.Slug, "index.html")
 		if err := r.ExecuteToFile("post", out, data); err != nil {
 			return fmt.Errorf("render post %s: %w", p.Slug, err)
-		}
-		// Copy co-located images referenced by the body so relative
-		// <img src="./foo.png"> resolves from /posts/<slug>/.
-		if err := copyReferencedImages(string(p.HTML), filepath.Dir(p.Path), filepath.Dir(out)); err != nil {
-			log.Printf("ssg: copy post %s images: %v", p.Slug, err)
 		}
 	}
 	log.Printf("ssg: rendered %d post pages", len(posts))
@@ -366,6 +369,13 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 	if err != nil {
 		return err
 	}
+	// Copy referenced body images and rewrite their src to absolute
+	// /<section>/foo.jpg so they resolve regardless of trailing slash.
+	if rewritten, err := localizeInlineImages(string(html), filepath.Dir(srcPath), filepath.Dir(outPath), "/"+section+"/"); err != nil {
+		log.Printf("ssg: copy %s assets: %v", section, err)
+	} else {
+		html = template.HTML(rewritten)
+	}
 	data := render.PageData{
 		Site:     site,
 		Section:  section,
@@ -375,11 +385,6 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 	if err := r.ExecuteToFile("markdown_page", outPath, data); err != nil {
 		return fmt.Errorf("render %s: %w", section, err)
 	}
-	// Copy any referenced images so relative <img src="./foo.jpg"> in the
-	// body resolves from the output directory.
-	if err := copyReferencedImages(string(html), filepath.Dir(srcPath), filepath.Dir(outPath)); err != nil {
-		log.Printf("ssg: copy %s assets: %v", section, err)
-	}
 	log.Printf("ssg: rendered %s", section)
 	return nil
 }
@@ -387,14 +392,16 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 // imgSrcRe extracts the src attribute from <img> tags in rendered HTML.
 var imgSrcRe = regexp.MustCompile(`<img[^>]*\bsrc="([^"]+)"`)
 
-// copyReferencedImages copies the relative-path images referenced by <img>
-// tags in a rendered body from srcDir into dstDir, so that markdown like
-// ![](./foo.png) — or a raw <img src="./foo.png"> — resolves when served at
-// the page's URL. Only co-located references are copied; absolute, remote,
-// and data: sources are left untouched. This deliberately copies only what
-// the body references, so unreferenced siblings (e.g. multi-MB cover sources)
-// don't bloat dist.
-func copyReferencedImages(body, srcDir, dstDir string) error {
+// localizeInlineImages copies the relative-path images referenced by <img>
+// tags in a rendered body from srcDir into dstDir, and rewrites their src to
+// an absolute URL (basePath + name). Relative srcs like ./foo.png only
+// resolve when the page is served with a trailing slash, which neither the
+// dev server nor Cloudflare Pages guarantees; absolute paths are
+// slash-agnostic. It returns the rewritten body. Only co-located references
+// are touched — absolute, remote, and data: sources are left alone, and only
+// referenced files are copied (so unreferenced multi-MB cover sources don't
+// bloat dist). basePath must end with "/".
+func localizeInlineImages(body, srcDir, dstDir, basePath string) (string, error) {
 	seen := make(map[string]struct{})
 	for _, m := range imgSrcRe.FindAllStringSubmatch(body, -1) {
 		src := m[1]
@@ -403,21 +410,23 @@ func copyReferencedImages(body, srcDir, dstDir string) error {
 			strings.HasPrefix(src, "data:") {
 			continue
 		}
-		rel := filepath.FromSlash(strings.TrimPrefix(src, "./"))
-		if _, ok := seen[rel]; ok {
+		if _, ok := seen[src]; ok {
 			continue
 		}
-		seen[rel] = struct{}{}
+		seen[src] = struct{}{}
+		rel := filepath.FromSlash(strings.TrimPrefix(src, "./"))
 		from := filepath.Join(srcDir, rel)
 		if _, err := os.Stat(from); err != nil {
 			log.Printf("ssg: referenced image not found: %s", from)
 			continue
 		}
 		if err := copyFile(from, filepath.Join(dstDir, rel)); err != nil {
-			return err
+			return body, err
 		}
+		abs := basePath + filepath.ToSlash(rel)
+		body = strings.ReplaceAll(body, `src="`+src+`"`, `src="`+abs+`"`)
 	}
-	return nil
+	return body, nil
 }
 
 func writeRSS(cfg *config.Config, site *render.Site, posts []*content.Post, covers map[string]*images.Variants) error {
