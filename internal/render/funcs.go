@@ -125,20 +125,22 @@ func (r *Renderer) SetCovers(covers map[string]*images.Variants, fallback *image
 }
 
 // cover emits a <picture>+<img> for a post's full-size cover.  Used by post.html.
+// Loading attribute is omitted (defaults to eager) since hero covers are
+// always above the fold.
 // args: post, alt, class, sizes.
 func (r *Renderer) cover(p *content.Post, alt, class, sizes string) template.HTML {
 	v := r.lookupVariants(p)
 	if v == nil {
-		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="eager">`, html.EscapeString(alt), html.EscapeString(class)))
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q>`, html.EscapeString(alt), html.EscapeString(class)))
 	}
-	return renderPicture(v, alt, class, sizes, "eager")
+	return renderPicture(v, alt, class, sizes, "")
 }
 
-// thumb emits an eager-loaded card thumbnail.  Use for cards that render
-// above (or near) the fold on listing pages.
+// thumb emits a card thumbnail with default (eager) loading.  Use for cards
+// on listing pages (home, /posts/, /tag/).
 // args: post, class.
 func (r *Renderer) thumb(p *content.Post, class string) template.HTML {
-	return r.thumbWith(p, class, "eager")
+	return r.thumbWith(p, class, "")
 }
 
 // thumbLazy emits a lazy-loaded card thumbnail.  Use for similar-posts and
@@ -150,7 +152,11 @@ func (r *Renderer) thumbLazy(p *content.Post, class string) template.HTML {
 func (r *Renderer) thumbWith(p *content.Post, class, loading string) template.HTML {
 	v := r.lookupVariants(p)
 	if v == nil {
-		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading=%q width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class), loading))
+		loadAttr := ""
+		if loading != "" {
+			loadAttr = fmt.Sprintf(` loading=%q`, loading)
+		}
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q width="400" height="224"%s>`, html.EscapeString(p.Title), html.EscapeString(class), loadAttr))
 	}
 	return renderPicture(v, p.Title, class, "400px", loading)
 }
@@ -165,10 +171,14 @@ func (r *Renderer) lookupVariants(p *content.Post) *images.Variants {
 func renderPicture(v *images.Variants, alt, class, sizes, loading string) template.HTML {
 	largest := v.Largest()
 	h := v.AspectHeight(largest.Width)
+	loadAttr := ""
+	if loading != "" {
+		loadAttr = fmt.Sprintf(` loading=%q`, loading)
+	}
 	return template.HTML(fmt.Sprintf(
-		`<picture><source type="image/webp" srcset="%s" sizes="%s"><img src="%s" srcset="%s" sizes="%s" width="%d" height="%d" alt="%s" class="%s" loading="%s"></picture>`,
+		`<picture><source type="image/webp" srcset="%s" sizes="%s"><img src="%s" srcset="%s" sizes="%s" width="%d" height="%d" alt="%s" class="%s"%s></picture>`,
 		v.SrcsetWebP(), sizes,
 		largest.URL, v.SrcsetJPG(), sizes,
 		largest.Width, h,
-		html.EscapeString(alt), html.EscapeString(class), loading))
+		html.EscapeString(alt), html.EscapeString(class), loadAttr))
 }
