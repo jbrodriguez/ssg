@@ -128,14 +128,17 @@ func (r *Renderer) cover(p *content.Post, alt, class, sizes string) template.HTM
 	return renderPicture(v, alt, class, sizes, "eager")
 }
 
-// thumb emits a smaller card image, used by blog_card.html.
+// thumb emits a smaller card image, used by blog_card.html.  Card thumbnails
+// are small (~10-30KB each) and typically visible above the fold on listing
+// pages, so we load them eagerly — lazy-loading was deferring them in dev
+// behind the SSE connection slot.
 // args: post, class.
 func (r *Renderer) thumb(p *content.Post, class string) template.HTML {
 	v := r.lookupVariants(p)
 	if v == nil {
-		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="lazy" width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class)))
+		return template.HTML(fmt.Sprintf(`<img src="/static/default-post-header-img.jpg" alt=%q class=%q loading="eager" width="400" height="224">`, html.EscapeString(p.Title), html.EscapeString(class)))
 	}
-	return renderPicture(v, p.Title, class, "400px", "lazy")
+	return renderPicture(v, p.Title, class, "400px", "eager")
 }
 
 func (r *Renderer) lookupVariants(p *content.Post) *images.Variants {
