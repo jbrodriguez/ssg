@@ -177,6 +177,19 @@ func buildOnce(cfg *config.Config) error {
 	if err := tailwind.Build(cfg.CSSEntry(), cssOut); err != nil {
 		return fmt.Errorf("tailwind: %w", err)
 	}
+	cssFile, err := os.OpenFile(cssOut, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open css for chroma append: %w", err)
+	}
+	if _, err := cssFile.WriteString("\n/* syntax highlighting */\n"); err != nil {
+		cssFile.Close()
+		return err
+	}
+	if err := render.WriteChromaCSS(cssFile); err != nil {
+		cssFile.Close()
+		return fmt.Errorf("chroma css: %w", err)
+	}
+	cssFile.Close()
 	log.Printf("ssg: built %s", cssOut)
 
 	// Static assets and fonts
