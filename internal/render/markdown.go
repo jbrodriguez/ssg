@@ -20,9 +20,9 @@ import (
 // goldmark only needs one style at render time.  Stylesheets are written
 // once per theme and scoped via [data-theme="…"].
 const (
-	chromaRenderStyle = "github-dark"
+	chromaRenderStyle = "tokyonight-night"
 	chromaStyleLight  = "github"
-	chromaStyleDark   = "github-dark"
+	chromaStyleDark   = "tokyonight-night"
 )
 
 // WriteChromaCSS emits two chroma stylesheets — one scoped to
