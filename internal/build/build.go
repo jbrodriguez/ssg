@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -482,7 +483,7 @@ func writeSitemap(cfg *config.Config, site *render.Site, posts []*content.Post, 
 		urls = append(urls, feed.SitemapURL{Loc: p.AbsURL(site.URL), LastMod: p.Date})
 	}
 	for tag := range byTag {
-		urls = append(urls, feed.SitemapURL{Loc: site.URL + "/tag/" + tag + "/"})
+		urls = append(urls, feed.SitemapURL{Loc: tagURL(site.URL, tag)})
 	}
 
 	out0 := filepath.Join(cfg.DistDir, "sitemap-0.xml")
@@ -596,8 +597,15 @@ func seoForTag(site *render.Site, tag string) render.SEO {
 	s := defaultSEO(site)
 	s.Title = fmt.Sprintf("Tags :: %s", site.Title)
 	s.Description = fmt.Sprintf("%s's posts under the tag %q.", site.Title, tag)
-	s.Canonical = site.URL + "/tag/" + tag + "/"
+	s.Canonical = tagURL(site.URL, tag)
 	return s
+}
+
+// tagURL builds the absolute URL for a tag page, percent-encoding the tag so
+// multi-word tags (e.g. "open source") yield a valid /tag/open%20source/ —
+// matching how the pages are served and the URLs Astro emitted.
+func tagURL(siteURL, tag string) string {
+	return siteURL + "/tag/" + url.PathEscape(tag) + "/"
 }
 
 func seoForTagsIndex(site *render.Site) render.SEO {
