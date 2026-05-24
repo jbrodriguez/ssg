@@ -95,7 +95,7 @@ func buildOnce(cfg *config.Config) error {
 	}
 	log.Printf("ssg: loaded %d posts", len(posts))
 
-	r, err := render.New(cfg.TemplatesDir(), cfg.SiteURL)
+	r, err := render.New(cfg.TemplatesDir(), cfg.SiteURL, cfg.ChromaLight, cfg.ChromaDark)
 	if err != nil {
 		return fmt.Errorf("parse templates: %w", err)
 	}
@@ -185,7 +185,7 @@ func buildOnce(cfg *config.Config) error {
 		cssFile.Close()
 		return err
 	}
-	if err := render.WriteChromaCSS(cssFile); err != nil {
+	if err := r.WriteChromaCSS(cssFile); err != nil {
 		cssFile.Close()
 		return fmt.Errorf("chroma css: %w", err)
 	}

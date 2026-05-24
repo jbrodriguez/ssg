@@ -21,15 +21,20 @@ type Renderer struct {
 	md            goldmark.Markdown
 	covers        map[string]*images.Variants
 	fallbackCover *images.Variants
+	chromaLight   string
+	chromaDark    string
 }
 
 // New parses every *.html under templatesDir (recursively) into one template
-// set so partials can be invoked via {{template "name" .}}.
-func New(templatesDir, siteURL string) (*Renderer, error) {
+// set so partials can be invoked via {{template "name" .}}.  chromaLight and
+// chromaDark name chroma styles emitted by WriteChromaCSS.
+func New(templatesDir, siteURL, chromaLight, chromaDark string) (*Renderer, error) {
 	r := &Renderer{
-		siteURL: siteURL,
-		md:      newMarkdown(),
-		covers:  map[string]*images.Variants{},
+		siteURL:     siteURL,
+		md:          newMarkdown(chromaDark),
+		covers:      map[string]*images.Variants{},
+		chromaLight: chromaLight,
+		chromaDark:  chromaDark,
 	}
 	t := template.New("").Funcs(r.funcMap())
 	if err := parseTree(t, templatesDir); err != nil {

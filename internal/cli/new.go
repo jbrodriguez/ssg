@@ -12,8 +12,8 @@ type NewCmd struct {
 }
 
 // Run executes the new-post scaffolder.
-func (n *NewCmd) Run(r *Root) error {
-	cfg, err := config.Load(r.Config, config.Overrides{})
+func (n *NewCmd) Run(_ *Root) error {
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}

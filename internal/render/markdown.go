@@ -16,27 +16,19 @@ import (
 	highlighting "github.com/yuin/goldmark-highlighting/v2"
 )
 
-// Chroma class names are theme-independent (`.k` is always "keyword"), so
-// goldmark only needs one style at render time.  Stylesheets are written
-// once per theme and scoped via [data-theme="…"].
-const (
-	chromaRenderStyle = "tokyonight-night"
-	chromaStyleLight  = "github"
-	chromaStyleDark   = "tokyonight-night"
-)
-
 // WriteChromaCSS emits two chroma stylesheets — one scoped to
-// [data-theme="light"], one scoped to [data-theme="dark"] — so code blocks
-// inherit the page theme automatically.  Call after tailwind compiles and
-// append to the main stylesheet.
-func WriteChromaCSS(w io.Writer) error {
-	if err := writeScopedChromaCSS(w, chromaStyleLight, `[data-theme="light"] `); err != nil {
+// [data-theme="light"], one scoped to [data-theme="dark"] — using the styles
+// configured on the renderer.  Call after tailwind compiles and append to
+// the main stylesheet.  Chroma class names are theme-independent so the
+// HTML output doesn't depend on which styles are chosen here.
+func (r *Renderer) WriteChromaCSS(w io.Writer) error {
+	if err := writeScopedChromaCSS(w, r.chromaLight, `[data-theme="light"] `); err != nil {
 		return err
 	}
 	if _, err := io.WriteString(w, "\n"); err != nil {
 		return err
 	}
-	return writeScopedChromaCSS(w, chromaStyleDark, `[data-theme="dark"] `)
+	return writeScopedChromaCSS(w, r.chromaDark, `[data-theme="dark"] `)
 }
 
 // writeScopedChromaCSS writes the chroma stylesheet for styleName with every
@@ -60,17 +52,18 @@ func writeScopedChromaCSS(w io.Writer, styleName, prefix string) error {
 // newMarkdown constructs the shared goldmark instance.  Configured for:
 //   - GFM (tables, strikethrough, autolinks, task lists)
 //   - footnotes
-//   - chroma syntax highlighting
+//   - chroma syntax highlighting (renderStyle picks one for class generation;
+//     the actual colors come from the CSS emitted by WriteChromaCSS)
 //   - unsafe HTML passthrough (post bodies contain inline HTML)
 //   - autolinks + heading IDs
-func newMarkdown() goldmark.Markdown {
+func newMarkdown(renderStyle string) goldmark.Markdown {
 	return goldmark.New(
 		goldmark.WithExtensions(
 			extension.GFM,
 			extension.Footnote,
 			extension.Table,
 			highlighting.NewHighlighting(
-				highlighting.WithStyle(chromaRenderStyle),
+				highlighting.WithStyle(renderStyle),
 				highlighting.WithFormatOptions(
 					chromahtml.WithClasses(true),
 				),

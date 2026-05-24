@@ -7,15 +7,14 @@ import (
 
 // BuildCmd is `ssg build`.
 type BuildCmd struct {
-	SiteRoot string `help:"Override site_root from config." type:"path"`
-	Serve    bool   `help:"Run dev server after build."`
-	Watch    bool   `help:"Watch for file changes and rebuild."`
-	Port     int    `default:"4321" help:"Port for the dev server."`
+	Serve bool `help:"Run dev server after build."`
+	Watch bool `help:"Watch for file changes and rebuild."`
+	Port  int  `default:"4321" help:"Port for the dev server."`
 }
 
 // Run executes the build subcommand.
-func (b *BuildCmd) Run(r *Root) error {
-	cfg, err := config.Load(r.Config, config.Overrides{SiteRoot: b.SiteRoot})
+func (b *BuildCmd) Run(_ *Root) error {
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
