@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -159,11 +160,15 @@ func buildOnce(cfg *config.Config) error {
 	if err := renderTagsIndex(r, cfg, site, posts, tags); err != nil {
 		return err
 	}
-	if err := renderSingle(r, cfg, site, "unbalanced", "unbalanced/index.md", filepath.Join(cfg.DistDir, "unbalanced", "index.html"), "unbalanced :: "+site.Title); err != nil {
-		log.Printf("ssg: unbalanced: %v", err)
+	singles, err := discoverSingles(cfg.ContentDir)
+	if err != nil {
+		return fmt.Errorf("discover pages: %w", err)
 	}
-	if err := renderSingle(r, cfg, site, "about", "about/index.md", filepath.Join(cfg.DistDir, "about", "index.html"), "About :: "+site.Title); err != nil {
-		log.Printf("ssg: about: %v (skipping)", err)
+	for _, name := range singles {
+		out := filepath.Join(cfg.DistDir, name, "index.html")
+		if err := renderSingle(r, cfg, site, name, filepath.Join(name, "index.md"), out); err != nil {
+			log.Printf("ssg: %s: %v", name, err)
+		}
 	}
 	if err := render404(r, cfg, site); err != nil {
 		return err
@@ -360,11 +365,41 @@ func renderTagsIndex(r *render.Renderer, cfg *config.Config, site *render.Site, 
 	return nil
 }
 
-func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, section, relPath, outPath, title string) error {
+// reservedSections are content-dir names that are not standalone pages: posts
+// is the blog tree; tag and page are generated route namespaces.
+var reservedSections = map[string]bool{"posts": true, "tag": true, "page": true}
+
+// discoverSingles returns the immediate content-dir subdirectories that hold an
+// index.md and aren't reserved route namespaces. Each renders to a standalone
+// page at /<name>/, so adding one (e.g. /now/) is just dropping a folder in
+// content/ — no code change. Names are sorted for deterministic build order.
+func discoverSingles(contentDir string) ([]string, error) {
+	entries, err := os.ReadDir(contentDir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() || reservedSections[e.Name()] {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(contentDir, e.Name(), "index.md")); err == nil {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, section, relPath, outPath string) error {
 	srcPath := filepath.Join(cfg.ContentDir, relPath)
 	page, err := content.LoadSingle(srcPath)
 	if err != nil {
 		return err
+	}
+	title := page.Title
+	if title == "" {
+		title = section
 	}
 	html, err := r.RenderMarkdown(page.Body)
 	if err != nil {
@@ -380,7 +415,7 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 	data := render.PageData{
 		Site:     site,
 		Section:  section,
-		SEO:      seoForSingle(site, title, page.Title),
+		SEO:      seoForSingle(site, title+" :: "+site.Title),
 		BodyHTML: html,
 	}
 	if err := r.ExecuteToFile("markdown_page", outPath, data); err != nil {
@@ -515,7 +550,7 @@ func render404(r *render.Renderer, cfg *config.Config, site *render.Site) error 
 	data := render.PageData{
 		Site:    site,
 		Section: "",
-		SEO:     seoForSingle(site, "404 :: "+site.Title, "Not found"),
+		SEO:     seoForSingle(site, "404 :: "+site.Title),
 	}
 	out := filepath.Join(cfg.DistDir, "404.html")
 	if err := r.ExecuteToFile("notfound", out, data); err != nil {
@@ -625,7 +660,7 @@ func seoForTagsIndex(site *render.Site) render.SEO {
 	return s
 }
 
-func seoForSingle(site *render.Site, title, _ string) render.SEO {
+func seoForSingle(site *render.Site, title string) render.SEO {
 	s := defaultSEO(site)
 	s.Title = title
 	return s
