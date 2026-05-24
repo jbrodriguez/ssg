@@ -133,12 +133,6 @@ chroma_dark      = "tokyonight-night"
 // PostsDir is content/posts.
 func (c *Config) PostsDir() string { return filepath.Join(c.ContentDir, "posts") }
 
-// AboutDir is content/about.
-func (c *Config) AboutDir() string { return filepath.Join(c.ContentDir, "about") }
-
-// UnbalancedDir is content/unbalanced.
-func (c *Config) UnbalancedDir() string { return filepath.Join(c.ContentDir, "unbalanced") }
-
 // TemplatesDir is theme/templates.
 func (c *Config) TemplatesDir() string { return filepath.Join(c.ThemeDir, "templates") }
 
