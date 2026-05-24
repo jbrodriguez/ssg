@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -222,6 +223,11 @@ func renderPosts(r *render.Renderer, cfg *config.Config, site *render.Site, post
 		if err := r.ExecuteToFile("post", out, data); err != nil {
 			return fmt.Errorf("render post %s: %w", p.Slug, err)
 		}
+		// Copy co-located images referenced by the body so relative
+		// <img src="./foo.png"> resolves from /posts/<slug>/.
+		if err := copyReferencedImages(string(p.HTML), filepath.Dir(p.Path), filepath.Dir(out)); err != nil {
+			log.Printf("ssg: copy post %s images: %v", p.Slug, err)
+		}
 	}
 	log.Printf("ssg: rendered %d post pages", len(posts))
 	return nil
@@ -369,34 +375,45 @@ func renderSingle(r *render.Renderer, cfg *config.Config, site *render.Site, sec
 	if err := r.ExecuteToFile("markdown_page", outPath, data); err != nil {
 		return fmt.Errorf("render %s: %w", section, err)
 	}
-	// Copy any sibling images so relative <img src="./foo.jpg"> in the
-	// markdown body resolves from the output directory.
-	if err := copySiblingAssets(filepath.Dir(srcPath), filepath.Dir(outPath)); err != nil {
+	// Copy any referenced images so relative <img src="./foo.jpg"> in the
+	// body resolves from the output directory.
+	if err := copyReferencedImages(string(html), filepath.Dir(srcPath), filepath.Dir(outPath)); err != nil {
 		log.Printf("ssg: copy %s assets: %v", section, err)
 	}
 	log.Printf("ssg: rendered %s", section)
 	return nil
 }
 
-// copySiblingAssets copies image-like files from srcDir to dstDir, skipping
-// the index markdown sources themselves.
-func copySiblingAssets(srcDir, dstDir string) error {
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
+// imgSrcRe extracts the src attribute from <img> tags in rendered HTML.
+var imgSrcRe = regexp.MustCompile(`<img[^>]*\bsrc="([^"]+)"`)
+
+// copyReferencedImages copies the relative-path images referenced by <img>
+// tags in a rendered body from srcDir into dstDir, so that markdown like
+// ![](./foo.png) — or a raw <img src="./foo.png"> — resolves when served at
+// the page's URL. Only co-located references are copied; absolute, remote,
+// and data: sources are left untouched. This deliberately copies only what
+// the body references, so unreferenced siblings (e.g. multi-MB cover sources)
+// don't bloat dist.
+func copyReferencedImages(body, srcDir, dstDir string) error {
+	seen := make(map[string]struct{})
+	for _, m := range imgSrcRe.FindAllStringSubmatch(body, -1) {
+		src := m[1]
+		if strings.HasPrefix(src, "http://") || strings.HasPrefix(src, "https://") ||
+			strings.HasPrefix(src, "//") || strings.HasPrefix(src, "/") ||
+			strings.HasPrefix(src, "data:") {
 			continue
 		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
-		switch ext {
-		case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg":
-		default:
+		rel := filepath.FromSlash(strings.TrimPrefix(src, "./"))
+		if _, ok := seen[rel]; ok {
 			continue
 		}
-		if err := copyFile(filepath.Join(srcDir, name), filepath.Join(dstDir, name)); err != nil {
+		seen[rel] = struct{}{}
+		from := filepath.Join(srcDir, rel)
+		if _, err := os.Stat(from); err != nil {
+			log.Printf("ssg: referenced image not found: %s", from)
+			continue
+		}
+		if err := copyFile(from, filepath.Join(dstDir, rel)); err != nil {
 			return err
 		}
 	}
